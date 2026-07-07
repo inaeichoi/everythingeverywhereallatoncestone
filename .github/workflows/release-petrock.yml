@@ -1,0 +1,36 @@
+name: Release PetRock
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - PetRock.ps1
+      - PetRock.bat
+      - .github/workflows/release-petrock.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  upload-release-assets:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build release archive
+        shell: pwsh
+        run: |
+          if (Test-Path pet-rock-widget.zip) {
+            Remove-Item pet-rock-widget.zip
+          }
+          Compress-Archive -Path PetRock.ps1, PetRock.bat -DestinationPath pet-rock-widget.zip
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release upload petrock1 PetRock.ps1 PetRock.bat pet-rock-widget.zip --repo $env:GITHUB_REPOSITORY --clobber
