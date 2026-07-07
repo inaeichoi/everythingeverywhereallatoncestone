@@ -23,6 +23,7 @@ jobs:
       - name: Build release archive
         shell: pwsh
         run: |
+          # Package the current widget files for the petrock1 release.
           if (Test-Path pet-rock-widget.zip) {
             Remove-Item pet-rock-widget.zip
           }
