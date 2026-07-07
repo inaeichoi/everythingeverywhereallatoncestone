@@ -5,6 +5,36 @@ function Log-Error([string]$context, $err) {
   "$(Get-Date -Format o) [$context] $err" | Out-File -FilePath $ErrorLogPath -Append -Encoding utf8
 }
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class PetRockNativeInput {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LASTINPUTINFO {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+    [DllImport("kernel32.dll")]
+    private static extern ulong GetTickCount64();
+
+    public static double GetIdleMilliseconds() {
+        LASTINPUTINFO info = new LASTINPUTINFO();
+        info.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO));
+        if (!GetLastInputInfo(ref info)) {
+            return -1;
+        }
+
+        uint now = unchecked((uint)GetTickCount64());
+        return unchecked(now - info.dwTime);
+    }
+}
+'@
+
 $xamlText = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -116,7 +146,7 @@ $work = [System.Windows.SystemParameters]::WorkArea
 $window.Left = $work.Left + ($work.Width - $window.Width) / 2
 $window.Top  = $work.Top + ($work.Height - $window.Height) / 2
 
-$IDLE_MS = 14000
+$IDLE_MS = 10000
 $MAXOFF = 9.0
 $LAG_K = 11.0
 $STIFF = 90.0
@@ -154,6 +184,20 @@ function Set-State {
 function Note-Activity {
   $script:lastActivity = Get-Date
   if ($script:state -eq 'sleepy') { Set-State 'normal' }
+}
+
+function Get-IdleMilliseconds {
+  $manualIdle = ((Get-Date) - $script:lastActivity).TotalMilliseconds
+  try {
+    $globalIdle = [PetRockNativeInput]::GetIdleMilliseconds()
+    if ($globalIdle -ge 0) {
+      return [Math]::Min($manualIdle, [double]$globalIdle)
+    }
+  } catch {
+    Log-Error 'GetIdleMilliseconds' $_
+  }
+
+  return $manualIdle
 }
 
 function Track-Shake {
@@ -214,8 +258,13 @@ $timer.Add_Tick({
     $script:stateUntil = [DateTime]::MinValue
   }
 
+  $idleMs = Get-IdleMilliseconds
+  if ($script:state -eq 'sleepy' -and $idleMs -lt $IDLE_MS) {
+    Set-State 'normal'
+  }
+
   if ($script:state -ne 'sleepy' -and $script:state -ne 'happy' -and $script:state -ne 'surprised') {
-    if (($now - $script:lastActivity).TotalMilliseconds -gt $IDLE_MS) { Set-State 'sleepy' }
+    if ($idleMs -gt $IDLE_MS) { Set-State 'sleepy' }
   }
 
   $curLeft = $window.Left; $curTop = $window.Top
